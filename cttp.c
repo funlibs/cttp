@@ -77,7 +77,7 @@ int main(int argc, char* argv[])
         clients[slot] = accept (listenfd, (struct sockaddr *) &clientaddr, &addrlen);
 
         if (clients[slot]<0)
-            error ("accept() error");
+            fprintf(stderr, "accept() error\n");
         else
         {
             if ( fork()==0 )
@@ -105,7 +105,7 @@ void startServer(char *port)
     hints.ai_flags = AI_PASSIVE;
     if (getaddrinfo( NULL, port, &hints, &res) != 0)
     {
-        perror ("getaddrinfo() error");
+        fprintf(stderr, "getaddrinfo() error");
         exit(1);
     }
     // socket and bind
@@ -117,7 +117,7 @@ void startServer(char *port)
     }
     if (p==NULL)
     {
-        perror ("socket() or bind()");
+        fprintf(stderr, "socket() or bind()");
         exit(1);
     }
 
@@ -126,7 +126,7 @@ void startServer(char *port)
     // listen for incoming connections
     if ( listen (listenfd, 1000000) != 0 )
     {
-        perror("listen() error");
+        fprintf(stderr, "listen() error");
         exit(1);
     }
 }
