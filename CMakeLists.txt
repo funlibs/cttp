@@ -7,22 +7,14 @@ set(CTTP_PATCH_VERSION 0)
 set(CTTP_VERSION
     ${CTTP_MAJOR_VERSION}.${CTTP_MINOR_VERSION}.${CTTP_PATCH_VERSION})
 
+configure_file(
+    ${CMAKE_SOURCE_DIR}/Makefile.in ${CMAKE_SOURCE_DIR}/Makefile)
+
+add_subdirectory(deps/)
 include_directories(
-    deps/cargo/)
+    .
+    ${DEPS_INCLUDES})
 
 add_executable(cttp cttp.c)
 
-# doc
-find_package (Doxygen)
-if (DOXYGEN_FOUND)
-
-  configure_file (
-    ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.in
-    ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
-
-  add_custom_target (cttp_doc
-    ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
-    WORKING DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMENT "Generating API documentation with Doxygen" VERBATIM)
-
-endif (DOXYGEN_FOUND)
+target_link_libraries(cttp ${DEPS_LIBRARIES} pthread)

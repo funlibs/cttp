@@ -1,184 +1,142 @@
-/*
- * MIT License
- *
- * CTTP Copyright (c) 2016 Sebastien Serre <ssbx@sysmo.io>.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <lthread.h>
 
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
-#include<stdio.h>
-#include<string.h>
-#include<stdlib.h>
-#include<unistd.h>
-#include<sys/types.h>
-#include<sys/stat.h>
-#include<sys/socket.h>
-#include<arpa/inet.h>
-#include<netdb.h>
-#include<signal.h>
-#include<fcntl.h>
+struct cli_info {
+    /* other stuff if needed*/
+    struct sockaddr_in peer_addr;
+    int fd;
+};
 
-#include <cargo.h>
+typedef struct cli_info cli_info_t;
 
-#define CONNMAX 1000
-#define BYTES 1024
+char *reply = "HTTP/1.0 200 OK\r\nContent-length: 11\r\n\r\nHello Kannan";
 
-char *ROOT;
-char *PORT;
-int listenfd, clients[CONNMAX];
-void error(char *);
-void startServer(char *);
-void respond(int);
-
-/**
- * @brief start a very tiny and limited http server
- * Options can be:
- *  --port=PORT (default is 8080)
- *  --root=ROOT (default is PWD)
- */
-int main(int argc, char* argv[])
+unsigned long long int
+fibonacci(unsigned long long int n)
 {
-    struct sockaddr_in clientaddr;
-    socklen_t addrlen;
-    char c;    
+    if (n == 0)
+        return 0;
+    if (n == 1)
+        return 1;
 
-    //Default Values PATH = ~/ and PORT=10000
-    PORT = cargoFlag("port", "8080", argc, argv);
-    ROOT = cargoFlag("root", getenv("PWD"), argc, argv);
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
 
-    int slot=0;
+void
+http_serv(void *arg)
+{
+    cli_info_t *cli_info = arg;
+    char *buf = NULL;
+    unsigned long long int ret = 0;
+    char ipstr[INET6_ADDRSTRLEN];
+    lthread_detach();
 
-    printf("Server started at port no. %s%s%s with root directory as %s%s%s\n","\033[92m",PORT,"\033[0m","\033[92m",ROOT,"\033[0m");
-    // Setting all elements to -1: signifies there is no client connected
-    int i;
-    for (i=0; i<CONNMAX; i++)
-        clients[i]=-1;
-    startServer(PORT);
+    inet_ntop(AF_INET, &cli_info->peer_addr.sin_addr, ipstr, INET_ADDRSTRLEN);
+    printf("Accepted connection on IP %s\n", ipstr);
 
-    // ACCEPT connections
-    while (1)
-    {
-        addrlen = sizeof(clientaddr);
-        clients[slot] = accept (listenfd, (struct sockaddr *) &clientaddr, &addrlen);
+    if ((buf = malloc(1024)) == NULL)
+        return;
 
-        if (clients[slot]<0)
-            fprintf(stderr, "accept() error\n");
-        else
-        {
-            if ( fork()==0 )
-            {
-                respond(slot);
-                exit(0);
-            }
+    /* read data from client or timeout in 5 secs */
+    ret = lthread_recv(cli_info->fd, buf, 1024, 0, 5000);
+
+    /* did we timeout before the user has sent us anything? */
+    if (ret == -2) {
+        lthread_close(cli_info->fd);
+        free(buf);
+        free(arg);
+        return;
+    }
+
+    /*
+     *  Run an expensive computation without blocking other lthreads.
+     *  lthread_compute_begin() will yield http_serv coroutine and resumes
+     *  it in a compute scheduler that runs in a pthread. If a compute scheduler
+     *  is already available and free it will be used otherwise a compute scheduler
+     *  is created and launched in a new pthread. After the compute scheduler
+     *  resumes the lthread it will wait 60 seconds for a new job and dies after 60
+     *  of inactivity.
+     */
+    lthread_compute_begin();
+    /* make an expensive call without blocking other coroutines */
+    ret = fibonacci(55);
+    lthread_compute_end();
+    printf("Computation completed\n");
+    /* reply back to user */
+    lthread_send(cli_info->fd, reply, strlen(reply), 0);
+    lthread_close(cli_info->fd);
+    free(buf);
+    free(arg);
+}
+
+    void
+listener(lthread_t *lt, void *arg)
+{
+    int cli_fd = 0;
+    int lsn_fd = 0;
+    int opt = 1;
+    int ret = 0;
+    struct sockaddr_in peer_addr = {};
+    struct   sockaddr_in sin = {};
+    socklen_t addrlen = sizeof(peer_addr);
+    lthread_t *cli_lt = NULL;
+    cli_info_t *cli_info = NULL;
+    char ipstr[INET6_ADDRSTRLEN];
+
+    DEFINE_LTHREAD;
+
+    /* create listening socket */
+    lsn_fd = lthread_socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (lsn_fd == -1)
+        return;
+
+    if (setsockopt(lsn_fd, SOL_SOCKET, SO_REUSEADDR, &opt,sizeof(int)) == -1)
+        perror("failed to set SOREUSEADDR on socket");
+
+    sin.sin_family = PF_INET;
+    sin.sin_addr.s_addr = INADDR_ANY;
+    sin.sin_port = htons(3128);
+
+    /* bind to the listening port */
+    ret = bind(lsn_fd, (struct sockaddr *)&sin, sizeof(sin));
+    if (ret == -1) {
+        perror("Failed to bind on port 3128");
+        return;
+    }
+
+    printf("Starting listener on 3128\n");
+
+    listen(lsn_fd, 128);
+
+    while (1) {
+        /* block until a new connection arrives */
+        cli_fd = lthread_accept(lsn_fd, (struct sockaddr*)&peer_addr, &addrlen);
+        if (cli_fd == -1) {
+            perror("Failed to accept connection");
+            return;
         }
 
-        while (clients[slot]!=-1) slot = (slot+1)%CONNMAX;
+        if ((cli_info = malloc(sizeof(cli_info_t))) == NULL) {
+            close(cli_fd);
+            continue;
+        }
+        cli_info->peer_addr = peer_addr;
+        cli_info->fd = cli_fd;
+        /* launch a new lthread that takes care of this client */
+        ret = lthread_create(&cli_lt, http_serv, cli_info);
     }
+}
+
+int
+main(int argc, char **argv)
+{
+    lthread_t *lt = NULL;
+
+    lthread_create(&lt, listener, NULL);
+    lthread_run();
 
     return 0;
-}
-
-//start server
-void startServer(char *port)
-{
-    struct addrinfo hints, *res, *p;
-
-    // getaddrinfo for host
-    memset (&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_PASSIVE;
-    if (getaddrinfo( NULL, port, &hints, &res) != 0)
-    {
-        fprintf(stderr, "getaddrinfo() error");
-        exit(1);
-    }
-    // socket and bind
-    for (p = res; p!=NULL; p=p->ai_next)
-    {
-        listenfd = socket (p->ai_family, p->ai_socktype, 0);
-        if (listenfd == -1) continue;
-        if (bind(listenfd, p->ai_addr, p->ai_addrlen) == 0) break;
-    }
-    if (p==NULL)
-    {
-        fprintf(stderr, "socket() or bind()");
-        exit(1);
-    }
-
-    freeaddrinfo(res);
-
-    // listen for incoming connections
-    if ( listen (listenfd, 1000000) != 0 )
-    {
-        fprintf(stderr, "listen() error");
-        exit(1);
-    }
-}
-
-//client connection
-void respond(int n)
-{
-    char mesg[99999], *reqline[3], data_to_send[BYTES], path[99999];
-    int rcvd, fd, bytes_read;
-
-    memset( (void*)mesg, (int)'\0', 99999 );
-
-    rcvd=recv(clients[n], mesg, 99999, 0);
-
-    if (rcvd<0)    // receive error
-        fprintf(stderr,("recv() error\n"));
-    else if (rcvd==0)    // receive socket closed
-        fprintf(stderr,"Client disconnected upexpectedly.\n");
-    else    // message received
-    {
-        printf("%s", mesg);
-        reqline[0] = strtok (mesg, " \t\n");
-        if ( strncmp(reqline[0], "GET\0", 4)==0 )
-        {
-            reqline[1] = strtok (NULL, " \t");
-            reqline[2] = strtok (NULL, " \t\n");
-            if ( strncmp( reqline[2], "HTTP/1.0", 8)!=0 && strncmp( reqline[2], "HTTP/1.1", 8)!=0 )
-            {
-                write(clients[n], "HTTP/1.0 400 Bad Request\n", 25);
-            }
-            else
-            {
-                if ( strncmp(reqline[1], "/\0", 2)==0 )
-                    reqline[1] = "/index.html";        //Because if no file is specified, index.html will be opened by default (like it happens in APACHE...
-
-                strcpy(path, ROOT);
-                strcpy(&path[strlen(ROOT)], reqline[1]);
-                printf("file: %s\n", path);
-
-                if ( (fd=open(path, O_RDONLY))!=-1 )    //FILE FOUND
-                {
-                    send(clients[n], "HTTP/1.0 200 OK\n\n", 17, 0);
-                    while ( (bytes_read=read(fd, data_to_send, BYTES))>0 )
-                        write (clients[n], data_to_send, bytes_read);
-                }
-                else    write(clients[n], "HTTP/1.0 404 Not Found\n", 23); //FILE NOT FOUND
-            }
-        }
-    }
-
-    //Closing SOCKET
-    shutdown (clients[n], SHUT_RDWR);         //All further send and recieve operations are DISABLED...
-    close(clients[n]);
-    clients[n]=-1;
 }
