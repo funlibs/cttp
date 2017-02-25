@@ -1,0 +1,9 @@
+[submodule "deps/cargo"]
+	path = deps/cargo
+	url = https://github.com/funlibs/cargo.git
+[submodule "deps/clog"]
+	path = deps/clog
+	url = https://github.com/funlibs/clog.git
+[submodule "deps/libtask"]
+	path = deps/libtask
+	url = https://github.com/ssbx/libtask.git
