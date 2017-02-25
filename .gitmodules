@@ -1,6 +1,0 @@
-[submodule "deps/cargo"]
-	path = deps/cargo
-	url = https://github.com/funlibs/cargo.git
-[submodule "deps/lthread"]
-	path = deps/lthread
-	url = https://github.com/ssbx/lthread.git
