@@ -14,7 +14,7 @@ set(DEPS_INCLUDES ${DEPS_INCLUDES} "${CMAKE_CURRENT_SOURCE_DIR}/cargo/")
 #
 add_subdirectory(libtask)
 set(DEPS_INCLUDES ${DEPS_INCLUDES} "${CMAKE_CURRENT_SOURCE_DIR}/libtask/")
-set(DEPS_LIBRARIES ${DEPS_LIBARRIES} ltask)
+set(DEPS_LIBRARIES ${DEPS_LIBARRIES} task)
 
 #
 # return
