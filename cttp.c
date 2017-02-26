@@ -37,42 +37,10 @@ mkfd2(int fd1, int fd2) {
     return a;
 }
 
-void
-proxytask(void *v) {
-    int fd, remotefd;
-
-    fd = (int) v;
-    if ((remotefd = netdial(TCP, server, port)) < 0) {
-        close(fd);
-        return;
-    }
-
-    fprintf(stderr, "connected to %s:%d\n", server, port);
-
-    taskcreate(rwtask, mkfd2(fd, remotefd), STACK);
-    taskcreate(rwtask, mkfd2(remotefd, fd), STACK);
-}
-
-void
-rwtask(void *v) {
-    int *a, rfd, wfd, n;
-    char buf[2048];
-
-    a = v;
-    rfd = a[0];
-    wfd = a[1];
-    free(a);
-
-    while ((n = fdread(rfd, buf, sizeof buf)) > 0)
-        fdwrite(wfd, buf, n);
-    shutdown(wfd, SHUT_WR);
-    close(rfd);
-}
-
 #define BYTES 1024
 
 void
-serve_http2_task(void *client_fd) {
+serve_http2_task(void* client_fd) {
     char mesg[99999], *reqline[3], data_to_send[BYTES], path[99999];
     int rcvd, fd, bytes_read;
     memset((void*) mesg, (int) '\0', 99999);
