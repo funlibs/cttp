@@ -9,4 +9,4 @@ compiler:
 
 script:
     - ./configure
-    - cd build && make
+    - cd _build && make
